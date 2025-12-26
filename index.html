@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon-Sync Karaoke | Ultimate Experience</title>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: #0a0a0c;
+            color: #e2e8f0;
+            font-family: 'Rajdhani', sans-serif;
+            overflow-x: hidden;
+        }
+        .neon-border {
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.3);
+            border: 1px solid rgba(139, 92, 246, 0.5);
+        }
+        .lyric-active {
+            color: #a78bfa;
+            text-shadow: 0 0 12px #8b5cf6;
+            transform: scale(1.1);
+            transition: all 0.3s ease;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        #visualizer {
+            filter: drop-shadow(0 0 5px #8b5cf6);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        <header class="flex justify-between items-center border-b border-white/10 pb-4">
+            <h1 class="text-3xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500">
+                NEON-SYNC <span class="text-xs font-light text-white/50">V1.0</span>
+            </h1>
+            <div class="flex items-center gap-4">
+                <div class="text-right">
+                    <p class="text-xs uppercase text-white/40">Score</p>
+                    <p id="score" class="text-2xl font-bold text-green-400">000000</p>
+                </div>
+                <div id="mic-status" class="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_red]"></div>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <div class="lg:col-span-2 space-y-4">
+                <div class="relative aspect-video rounded-2xl overflow-hidden neon-border">
+                    <div id="player"></div>
+                    <div id="setup-overlay" class="absolute inset-0 glass flex flex-col items-center justify-center p-6 text-center z-10">
+                        <h2 class="text-2xl mb-4">Insira o Link do YouTube</h2>
+                        <input type="text" id="video-url" placeholder="https://www.youtube.com/watch?v=..." 
+                               class="w-full max-w-md bg-black/40 border border-white/20 p-3 rounded-lg mb-4 outline-none focus:border-violet-500 transition-all">
+                        <button onclick="loadVideo()" class="bg-violet-600 hover:bg-violet-500 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105">
+                            CARREGAR PALCO
+                        </button>
+                    </div>
+                </div>
+
+                <div class="glass rounded-xl p-4 h-24 flex items-center justify-center">
+                    <canvas id="visualizer" class="w-full h-full"></canvas>
+                </div>
+            </div>
+
+            <div class="glass rounded-2xl p-6 h-[500px] flex flex-col">
+                <h3 class="text-sm uppercase tracking-tighter text-white/30 mb-4 italic">Letras Sincronizadas</h3>
+                <div id="lyrics-container" class="flex-1 overflow-y-auto space-y-6 text-xl text-white/40 font-medium">
+                    <p class="italic text-sm">Aguardando início da música...</p>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        let player;
+        let score = 0;
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let animationId;
+        
+        // Mock de letras (Em um sistema real, você buscaria de uma API de letras ou carregaria um arquivo .lrc)
+        const mockLyrics = [
+            { time: 5, text: "Bem-vindo ao Neon-Sync" },
+            { time: 8, text: "Aqueça sua voz agora" },
+            { time: 12, text: "Sinta o ritmo da noite" },
+            { time: 16, text: "O código corre nas veias" },
+            { time: 20, text: "Brilhando na escuridão!" }
+        ];
+
+        function onYouTubeIframeAPIReady() {
+            // Inicializa vazio
+        }
+
+        function loadVideo() {
+            const url = document.getElementById('video-url').value;
+            const videoId = extractVideoID(url);
+            
+            if (videoId) {
+                document.getElementById('setup-overlay').style.display = 'none';
+                initPlayer(videoId);
+                initAudio();
+            } else {
+                alert("URL Inválida!");
+            }
+        }
+
+        function extractVideoID(url) {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length == 11) ? match[2] : false;
+        }
+
+        function initPlayer(videoId) {
+            player = new YT.Player('player', {
+                height: '100%',
+                width: '100%',
+                videoId: videoId,
+                playerVars: { 'autoplay': 1, 'controls': 0, 'modestbranding': 1 },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+        }
+
+        function onPlayerReady(event) {
+            renderLyrics();
+            setInterval(updateLyrics, 100);
+        }
+
+        function onPlayerStateChange(event) {
+            if (event.data == YT.PlayerState.PLAYING) {
+                requestAnimationFrame(analyzeVoice);
+            }
+        }
+
+        function renderLyrics() {
+            const container = document.getElementById('lyrics-container');
+            container.innerHTML = mockLyrics.map((l, i) => `
+                <p id="lyric-${i}" class="transition-all duration-500">${l.text}</p>
+            `).join('');
+        }
+
+        function updateLyrics() {
+            const currentTime = player.getCurrentTime();
+            mockLyrics.forEach((lyric, index) => {
+                const element = document.getElementById(`lyric-${index}`);
+                if (currentTime >= lyric.time && (index === mockLyrics.length - 1 || currentTime < mockLyrics[index+1].time)) {
+                    if (!element.classList.contains('lyric-active')) {
+                        element.classList.add('lyric-active');
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                } else {
+                    element.classList.remove('lyric-active');
+                }
+            });
+        }
+
+        // Sistema de Áudio e Pontuação Justa
+        async function initAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser);
+                
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                document.getElementById('mic-status').classList.remove('bg-red-500');
+                document.getElementById('mic-status').classList.add('bg-green-500', 'shadow-[0_0_10px_#4ade80]');
+                
+                drawVisualizer();
+            } catch (err) {
+                console.error("Erro ao acessar microfone:", err);
+                alert("Microfone necessário para pontuação!");
+            }
+        }
+
+        function analyzeVoice() {
+            if (!analyser || player.getPlayerState() !== YT.PlayerState.PLAYING) return;
+            
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Lógica de Pontuação "Justa": 
+            // Verifica se há volume (input de áudio) enquanto uma letra está ativa
+            const volume = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            const currentTime = player.getCurrentTime();
+            
+            const isInsideLyricTime = mockLyrics.some(l => currentTime >= l.time && currentTime <= l.time + 3);
+
+            if (isInsideLyricTime && volume > 30) {
+                score += Math.floor(volume / 5);
+                updateScoreDisplay();
+            }
+            
+            requestAnimationFrame(analyzeVoice);
+        }
+
+        function updateScoreDisplay() {
+            document.getElementById('score').innerText = score.toString().padStart(6, '0');
+        }
+
+        function drawVisualizer() {
+            const canvas = document.getElementById('visualizer');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+                
+                ctx.clearRect(0, 0, width, height);
+                const barWidth = (width / dataArray.length) * 2.5;
+                let x = 0;
+
+                for (let i = 0; i < dataArray.length; i++) {
+                    const barHeight = dataArray[i] / 2;
+                    ctx.fillStyle = `rgba(167, 139, 244, ${barHeight / 100})`;
+                    ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+                    x += barWidth + 1;
+                }
+            }
+            draw();
+        }
+    </script>
+</body>
+</html>
